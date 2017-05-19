@@ -1,13 +1,12 @@
 package client
 
 import (
-	"net/url"
 	"reflect"
 	"strconv"
 )
 
-func struct2map(i interface{}) url.Values {
-	values := url.Values{}
+func struct2map(i interface{}) RequestParams {
+	values := RequestParams{}
 	iVal := reflect.ValueOf(i).Elem()
 	typ := iVal.Type()
 	for i := 0; i < iVal.NumField(); i++ {
@@ -36,11 +35,11 @@ func struct2map(i interface{}) url.Values {
 			v = fieldValue.String()
 		case map[string]string:
 			for _, prm := range fieldValue.MapKeys() {
-				values.Set(sprintf("%s[%s]", fieldName, prm), fieldValue.MapIndex(prm).String())
+				values[sprintf("%s[%s]", fieldName, prm)] = fieldValue.MapIndex(prm).String()
 			}
 			continue
 		}
-		values.Set(fieldName, v)
+		values[fieldName] = v
 	}
 	return values
 }
