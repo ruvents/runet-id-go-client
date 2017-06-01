@@ -1,4 +1,4 @@
-package client
+package api
 
 type ApiError struct {
 	Code    uint16

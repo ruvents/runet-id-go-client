@@ -1,4 +1,4 @@
-package client
+package api
 
 import (
 	"net/url"
@@ -21,4 +21,12 @@ func (params RequestParams) ToLogFields() log.Fields {
 		fields[key] = value
 	}
 	return fields
+}
+
+func (params RequestParams) ToArray() []interface{} {
+	values := make([]interface{}, len(params)*2)
+	for key, value := range params {
+		values = append(values, key, value)
+	}
+	return values
 }

@@ -1,4 +1,4 @@
-package client
+package api
 
 import (
 	"crypto/md5"
@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tidwall/gjson"
 	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"github.com/tidwall/gjson"
 )
 
 var (
@@ -19,8 +19,6 @@ var (
 	itoa       = strconv.Itoa
 	sprintf    = fmt.Sprintf
 )
-
-const cfgApiHost = "api.runet-id.com"
 
 type Client struct {
 	// private
@@ -34,7 +32,7 @@ func NewClient(apikey, secret string) *Client {
 	return &Client{
 		apikey:  apikey,
 		apihash: hex.EncodeToString(hash[:]),
-		apihost: "runet-id.com",
+		apihost: "api.runet-id.com",
 	}
 }
 
@@ -49,7 +47,7 @@ func (client Client) Request(method string, params RequestParams) (body []byte, 
 	prms.Set("ApiKey", client.apikey)
 	prms.Set("Hash", client.apihash)
 	// Определяем адрес запроса, который пригодтся для отладочных сообщений
-	requestUrl := sprintf("http://%s/%s", cfgApiHost, method)
+	requestUrl := sprintf("http://%s/%s", client.apihost, method)
 	// Отправляем запрос
 	if resp, err = httpClient.PostForm(requestUrl, prms); err == nil {
 		// Читаем содержимое ответа сервера
@@ -59,11 +57,10 @@ func (client Client) Request(method string, params RequestParams) (body []byte, 
 		// Проверка ошибки запроса к api
 		if gjson.Get(string(body), "Error.Code").Exists() {
 			jsonData := gjson.GetMany(string(body), "Error.Code", "Error.Message")
-			return nil, mkerr("Ошибка с кодом %d при обращении к %s: %s /////////////// %s",
+			return nil, mkerr("Ошибка с кодом %d при обращении к %s: %s",
 				uint16(jsonData[0].Num),
 				requestUrl,
 				jsonData[1].Str,
-				tojson(params),
 			)
 		}
 		return
@@ -91,11 +88,37 @@ func (client Client) GetUserByEmail(email string) (User, error) {
 }
 
 func (client Client) GetUserByParams(params RequestParams) (user User, err error) {
-	var body []byte
-	if body, err = client.Request("user/get", params); err == nil {
+	var body []byte; /**/ if body, err = client.Request("user/get", params); err == nil {
 		err = json.Unmarshal(body, &user)
 	}
 	return
+}
+
+func (client Client) Basket(idPayer int) (basket Basket, err error) {
+	body, err := client.Request("pay/list", RequestParams{
+		"PayerRunetId": itoa(idPayer),
+	})
+	if err == nil {
+		err = json.Unmarshal(body, &basket)
+	}
+	return
+}
+
+func (client Client) BasketAdd(idProduct, idPayer, idOwner int) (err error) {
+	_, err = client.Request("pay/add", RequestParams{
+		"ProductId":    itoa(idProduct),
+		"PayerRunetId": itoa(idPayer),
+		"OwnerRunetId": itoa(idOwner),
+	})
+	return
+}
+
+func (client Client) BasketUrl(idPayer int) (url string, err error) {
+	var body []byte
+	body, err = client.Request("pay/url", RequestParams{
+		"PayerRunetId": itoa(idPayer),
+	})
+	return gjson.Get(string(body), "Url").String(), err
 }
 
 func mkerr(format string, a ...interface{}) error {
