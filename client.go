@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/tidwall/gjson"
 	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
-	"github.com/tidwall/gjson"
 )
 
 var (
@@ -25,6 +25,8 @@ type Client struct {
 	apikey  string
 	apihash string
 	apihost string
+	// Настройки режима отладки
+	isVerboseShowResponse bool
 }
 
 func NewClient(apikey, secret string) *Client {
@@ -36,8 +38,14 @@ func NewClient(apikey, secret string) *Client {
 	}
 }
 
-func (client *Client) SetHost(host string) {
+func (client *Client) SetHost(host string) *Client {
 	client.apihost = host
+	return client
+}
+
+func (client *Client) SetVerboseShowResponse() *Client {
+	client.isVerboseShowResponse = true
+	return client
 }
 
 func (client Client) Request(method string, params RequestParams) (body []byte, err error) {
@@ -63,10 +71,77 @@ func (client Client) Request(method string, params RequestParams) (body []byte, 
 				jsonData[1].Str,
 			)
 		}
+		// В режиме отладки отображаем возвращённый контент
+		if client.isVerboseShowResponse {
+			println(string(body))
+		}
 		return
 	} else {
-		return nil, mkerr("Ошибка отправки запроса")
+		return nil, mkerr(fmt.Sprintf("Ошибка отправки запроса: %s", err.Error()))
 	}
+}
+
+func (client Client) CreateUser(schema User, customizers ... RequestParams) (user User, err error) {
+	params := RequestParams{
+		"Email":      schema.Email,
+		"FirstName":  schema.FirstName,
+		"LastName":   schema.LastName,
+		"FatherName": schema.FatherName,
+		"Phone":      schema.Phone,
+		"Company":    schema.Company,
+	}
+	if len(schema.Attributes) != 0 {
+		for param, value := range schema.Attributes {
+			params["Attributes["+param+"]"] = value
+		}
+	}
+	for _, customizer := range customizers {
+		for param, value := range customizer {
+			params[param] = value
+		}
+	}
+	var body []byte; /**/ if body, err = client.Request("user/create", params); err == nil {
+		err = json.Unmarshal(body, &user)
+	}
+	return
+}
+
+func (client Client) EditUser(schema User, customizers ... RequestParams) (user User, err error) {
+	params := RequestParams{
+		"RunetId":    strconv.Itoa(schema.RunetId),
+		"Email":      schema.Email,
+		"FirstName":  schema.FirstName,
+		"LastName":   schema.LastName,
+		"FatherName": schema.FatherName,
+		"Phone":      schema.Phone,
+		"Company":    schema.Company,
+	}
+	if len(schema.Attributes) != 0 {
+		for param, value := range schema.Attributes {
+			params["Attributes["+param+"]"] = value
+		}
+	}
+	for _, customizer := range customizers {
+		for param, value := range customizer {
+			params[param] = value
+		}
+	}
+	var body []byte; /**/ if body, err = client.Request("user/edit", params); err == nil {
+		err = json.Unmarshal(body, &user)
+	}
+	return
+}
+
+
+func (client Client) EventRegister(RunetID int, RoleID int) (user User, err error) {
+	params := RequestParams{
+		"RunetId":    strconv.Itoa(RunetID),
+		"RoleId":     strconv.Itoa(RoleID),
+	}
+	var body []byte; /**/ if body, err = client.Request("event/register", params); err == nil {
+		err = json.Unmarshal(body, &user)
+	}
+	return
 }
 
 func (client Client) GetUser(runetid int) (User, error) {
@@ -88,7 +163,8 @@ func (client Client) GetUserByEmail(email string) (User, error) {
 }
 
 func (client Client) GetUserByParams(params RequestParams) (user User, err error) {
-	var body []byte; /**/ if body, err = client.Request("user/get", params); err == nil {
+	var body []byte /**/
+	if body, err = client.Request("user/get", params); err == nil {
 		err = json.Unmarshal(body, &user)
 	}
 	return

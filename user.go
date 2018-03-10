@@ -5,17 +5,19 @@ import (
 )
 
 type User struct {
-	RunetID    int    `json:"RunetId"`
+	RunetId    int    `json:"RunetId"`
 	ExternalID string `json:"ExternalId"`
 	Email      string
+	Phone      string
 	LastName   string `json:"LastName"`
 	FirstName  string `json:"FirstName"`
+	FatherName string `json:"FatherName"`
 	Company    string `json:"Company"`
 	Position   string `json:"Position"`
 	Attributes map[string]string
 }
 
-func NewUser() User {
+func NewUser(schema... User) User {
 	return User{
 		Attributes: map[string]string{},
 	}
@@ -45,7 +47,7 @@ func (user User) Update(api *Client) error {
 func (user User) Register(api *Client, roleid int) error {
 	_, err := api.Request("event/register", RequestParams{
 		"RoleId":  itoa(roleid),
-		"RunetId": itoa(user.RunetID),
+		"RunetId": itoa(user.RunetId),
 	})
 	return err
 }

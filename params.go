@@ -1,8 +1,8 @@
 package api
 
 import (
-	"net/url"
 	"github.com/apex/log"
+	"net/url"
 )
 
 type RequestParams map[string]string
