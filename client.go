@@ -144,6 +144,16 @@ func (client Client) EventRegister(RunetID int, RoleID int) (user User, err erro
 	return
 }
 
+func (client Client) EventUnregister(RunetID int) (user User, err error) {
+	params := RequestParams{
+		"RunetId": strconv.Itoa(RunetID),
+	}
+	var body []byte; /**/ if body, err = client.Request("event/unregister", params); err == nil {
+		err = json.Unmarshal(body, &user)
+	}
+	return
+}
+
 func (client Client) GetUser(runetid int) (User, error) {
 	return client.GetUserByParams(RequestParams{
 		"RunetId": itoa(runetid),
