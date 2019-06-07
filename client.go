@@ -1,23 +1,31 @@
 package api
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/tidwall/gjson"
+	"github.com/parnurzeal/gorequest"
 	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"github.com/ruvents/api-go/models"
+	"net"
+	"github.com/apex/log"
+	"github.com/ruvents/tools"
+	"net/url"
 )
 
 var (
-	httpClient = &http.Client{Timeout: 18 * time.Second}
-	itoa       = strconv.Itoa
-	sprintf    = fmt.Sprintf
+	itoa          = strconv.Itoa
+	sprintf       = fmt.Sprintf
+	httpClientNew = gorequest.New()
+	httpClient    = &http.Client{
+		Timeout:   18 * time.Second,
+		Transport: &http.Transport{TLSHandshakeTimeout: 5 * time.Second, Dial: (&net.Dialer{Timeout: 5 * time.Second}).Dial},
+	}
 )
 
 type Client struct {
@@ -29,11 +37,14 @@ type Client struct {
 	isVerboseShowResponse bool
 }
 
+type ErrorResponse struct {
+	Message string `json:"message"`
+}
+
 func NewClient(apikey, secret string) *Client {
-	hash := md5.Sum([]byte(apikey + secret))
 	return &Client{
 		apikey:  apikey,
-		apihash: hex.EncodeToString(hash[:]),
+		apihash: tools.MD5(apikey + secret),
 		apihost: "api.runet-id.com",
 	}
 }
@@ -48,16 +59,69 @@ func (client *Client) SetVerboseShowResponse() *Client {
 	return client
 }
 
-func (client Client) Request(method string, params RequestParams) (body []byte, err error) {
+func (client Client) RequestNew(v interface{}, request *Request) (err error) {
+	var clientResponse *http.Response
+	var clientRequest *http.Request
+	// Готовим подпись реквизитами доступа создаваемый запрос
+	queryParams := url.Values{}
+	queryParams.Set("ApiKey", client.apikey)
+	queryParams.Set("Hash", client.apihash)
+	// Определяем адрес запроса, который пригодтся для отладочных сообщений
+	requestURL := url.URL{
+		Host:     client.apihost + ":9000",
+		Path:     string(request.path) + "/",
+		Scheme:   "http",
+		RawQuery: queryParams.Encode(),
+	}
+	// Конструируем запрос
+	clientRequest, err = http.NewRequest(string(request.kind), requestURL.String(), nil)
+	// Отправляем запрос
+	if clientResponse, err = httpClient.Do(clientRequest); err == nil {
+		// Читаем содержимое ответа сервера
+		var body []byte; /**/ if body, err = ioutil.ReadAll(clientResponse.Body); err != nil {
+			return mkerr("Ошибка чтения содержания ответа %s: %s", requestURL, err)
+		}
+		// В режиме отладки отображаем возвращённый контент
+		if client.isVerboseShowResponse {
+			log.WithField("RequestURL", requestURL.String()).
+				WithField("ResponseBODY", string(body)).
+				Info("Запрос к API")
+		}
+		// Пробуем парсить ответ сервера в необходимую структуру данных
+		if err = json.Unmarshal(body, &v); err != nil {
+			// Не смогли декодировать содержимое ответа, а не стандартная ли ошибка api пришла?
+			var errorResponse ErrorResponse; /**/ if err = json.Unmarshal(body, &errorResponse); err == nil {
+				log.Errorf("Ошибка на стороне API: %s", errorResponse.Message)
+			} else {
+				log.Errorf("Ошибка на стороне API (нестандартная): %s", string(body))
+			}
+		}
+		//	// Проверка ошибки запроса к api
+		//	if gjson.Get(string(body), "Error.Code").Exists() {
+		//		jsonData := gjson.GetMany(string(body), "Error.Code", "Error.Message")
+		//		return nil, mkerr("Ошибка с кодом %d при обращении к %s: %s",
+		//			uint16(jsonData[0].Num),
+		//			requestUrl,
+		//			jsonData[1].Str,
+		//		)
+		//	}
+		return
+	} else {
+		return mkerr(fmt.Sprintf("Ошибка отправки запроса: %s", err.Error()))
+	}
+
+	return
+}
+
+func (client Client) Request(method string, path string, params RequestParams) (body []byte, err error) {
 	var resp *http.Response
 	// Подписываем переданный набор параметров запроса реквизитами доступа
-	prms := params.ToUrlValues()
-	prms.Set("ApiKey", client.apikey)
-	prms.Set("Hash", client.apihash)
+	params["ApiKey"] = client.apikey
+	params["Hash"] = client.apihash
 	// Определяем адрес запроса, который пригодтся для отладочных сообщений
-	requestUrl := sprintf("http://%s/%s", client.apihost, method)
+	requestUrl := sprintf("http://%s/%s/", client.apihost, path)
 	// Отправляем запрос
-	if resp, err = httpClient.PostForm(requestUrl, prms); err == nil {
+	if resp, err = httpClient.PostForm(requestUrl, params.ToUrlValues()); err == nil {
 		// Читаем содержимое ответа сервера
 		if body, err = ioutil.ReadAll(resp.Body); err != nil {
 			return body, mkerr("Ошибка чтения содержания ответа %s: %s", requestUrl, err)
@@ -100,7 +164,33 @@ func (client Client) CreateUser(schema User, customizers ... RequestParams) (use
 			params[param] = value
 		}
 	}
-	var body []byte; /**/ if body, err = client.Request("user/create", params); err == nil {
+	var body []byte; /**/ if body, err = client.Request(http.MethodPost, "user/create", params); err == nil {
+		err = json.Unmarshal(body, &user)
+	}
+	return
+}
+
+func (client Client) EditUserNew(schema models.User, customizers ... RequestParams) (user User, err error) {
+	params := RequestParams{
+		"RunetId":    strconv.Itoa(int(schema.ID)),
+		"Email":      schema.Email,
+		"FirstName":  schema.FirstName,
+		"LastName":   schema.LastName,
+		"FatherName": schema.FatherName,
+		"Phone":      schema.Phone,
+		"Company":    schema.Work.Company,
+	}
+	if len(schema.Attributes) != 0 {
+		for param, value := range schema.Attributes {
+			params["Attributes["+param+"]"] = value
+		}
+	}
+	for _, customizer := range customizers {
+		for param, value := range customizer {
+			params[param] = value
+		}
+	}
+	var body []byte; /**/ if body, err = client.Request(http.MethodPost, "user/edit", params); err == nil {
 		err = json.Unmarshal(body, &user)
 	}
 	return
@@ -108,7 +198,7 @@ func (client Client) CreateUser(schema User, customizers ... RequestParams) (use
 
 func (client Client) EditUser(schema User, customizers ... RequestParams) (user User, err error) {
 	params := RequestParams{
-		"RunetId":    strconv.Itoa(schema.RunetId),
+		"RunetId":    strconv.Itoa(int(schema.RunetId)),
 		"Email":      schema.Email,
 		"FirstName":  schema.FirstName,
 		"LastName":   schema.LastName,
@@ -126,37 +216,92 @@ func (client Client) EditUser(schema User, customizers ... RequestParams) (user 
 			params[param] = value
 		}
 	}
-	var body []byte; /**/ if body, err = client.Request("user/edit", params); err == nil {
+	var body []byte; /**/ if body, err = client.Request(http.MethodPost, "user/edit", params); err == nil {
 		err = json.Unmarshal(body, &user)
 	}
 	return
 }
 
-
-func (client Client) EventRegister(RunetID int, RoleID int) (user User, err error) {
+func (client Client) EventHandoutGet(category string, runetid uint32) (handout Handout, err error) {
 	params := RequestParams{
-		"RunetId":    strconv.Itoa(RunetID),
-		"RoleId":     strconv.Itoa(RoleID),
+		"Category": category,
+		"RunetId":  fmt.Sprintf("%d", runetid),
 	}
-	var body []byte; /**/ if body, err = client.Request("event/register", params); err == nil {
-		err = json.Unmarshal(body, &user)
+	var body []byte; /**/ if body, err = client.Request(http.MethodPost, "handout/get", params); err == nil {
+		err = json.Unmarshal(body, &handout)
 	}
 	return
 }
 
-func (client Client) EventUnregister(RunetID int) (user User, err error) {
+func (client Client) EventParticipants() (users []models.User, err error) {
+	err = client.RequestNew(&users, &Request{
+		kind: http.MethodGet,
+		path: PathEventParticipants,
+	})
+
+	return
+}
+
+func (client Client) EventParticipantsUnsafe() (users []models.User) {
+	client.RequestNew(&users, &Request{
+		kind: http.MethodGet,
+		path: PathEventParticipants,
+	})
+
+	return
+}
+
+func (client Client) EventParticipantsTS18() (users []User, err error) {
+	type UserNew struct {
+		RunetId    int    `json:"id"`
+		Email      string `json:"email"`
+		Phone      string `json:"phone"`
+		LastName   string `json:"lastName"`
+		FirstName  string `json:"firstName"`
+		FatherName string `json:"fatherName"`
+		Attributes map[string]string
+	}
+
+	var response []UserNew; /**/ httpClientNew.Get("http://runet-id.com:8080/event/participants").EndStruct(&response)
+	for _, user := range response {
+		users = append(users, User{
+			RunetId:    uint32(user.RunetId),
+			Email:      user.Email,
+			Phone:      user.Phone,
+			LastName:   user.LastName,
+			FirstName:  user.FirstName,
+			FatherName: user.FatherName,
+			Attributes: user.Attributes,
+		})
+	}
+
+	return
+}
+
+func (client Client) EventRegister(RunetID uint32, RoleID uint32) (user User, err error) {
 	params := RequestParams{
-		"RunetId": strconv.Itoa(RunetID),
+		"RunetId": tools.MakeStringFromUINT32(RunetID),
+		"RoleId":  tools.MakeStringFromUINT32(RoleID),
 	}
-	var body []byte; /**/ if body, err = client.Request("event/unregister", params); err == nil {
+	var body []byte; /**/ if body, err = client.Request(http.MethodPost, "event/register", params); err == nil {
 		err = json.Unmarshal(body, &user)
 	}
 	return
 }
 
-func (client Client) GetUser(runetid int) (User, error) {
+func (client Client) EventUnregister(RunetID uint32) (user User, err error) {
+	params := RequestParams{
+		"RunetId": tools.MakeStringFromUINT32(RunetID),
+	}
+	var body []byte; /**/ if body, err = client.Request(http.MethodPost, "event/unregister", params); err == nil {
+		err = json.Unmarshal(body, &user)
+	}
+	return
+}
+
+func (client Client) GetUser(runetid uint32) (User, error) {
 	return client.GetUserByParams(RequestParams{
-		"RunetId": itoa(runetid),
+		"RunetId": tools.MakeStringFromUINT32(runetid),
 	})
 }
 
@@ -174,15 +319,15 @@ func (client Client) GetUserByEmail(email string) (User, error) {
 
 func (client Client) GetUserByParams(params RequestParams) (user User, err error) {
 	var body []byte /**/
-	if body, err = client.Request("user/get", params); err == nil {
+	if body, err = client.Request(http.MethodPost, "user/get", params); err == nil {
 		err = json.Unmarshal(body, &user)
 	}
 	return
 }
 
-func (client Client) Basket(idPayer int) (basket Basket, err error) {
-	body, err := client.Request("pay/list", RequestParams{
-		"PayerRunetId": itoa(idPayer),
+func (client Client) Basket(idPayer uint32) (basket Basket, err error) {
+	body, err := client.Request(http.MethodPost, "pay/list", RequestParams{
+		"PayerRunetId": tools.MakeStringFromUINT32(idPayer),
 	})
 	if err == nil {
 		err = json.Unmarshal(body, &basket)
@@ -190,19 +335,19 @@ func (client Client) Basket(idPayer int) (basket Basket, err error) {
 	return
 }
 
-func (client Client) BasketAdd(idProduct, idPayer, idOwner int) (err error) {
-	_, err = client.Request("pay/add", RequestParams{
+func (client Client) BasketAdd(idProduct int, idPayer, idOwner uint32) (err error) {
+	_, err = client.Request(http.MethodPost, "pay/add", RequestParams{
 		"ProductId":    itoa(idProduct),
-		"PayerRunetId": itoa(idPayer),
-		"OwnerRunetId": itoa(idOwner),
+		"PayerRunetId": tools.MakeStringFromUINT32(idPayer),
+		"OwnerRunetId": tools.MakeStringFromUINT32(idOwner),
 	})
 	return
 }
 
-func (client Client) BasketUrl(idPayer int) (url string, err error) {
+func (client Client) BasketUrl(idPayer uint32) (url string, err error) {
 	var body []byte
-	body, err = client.Request("pay/url", RequestParams{
-		"PayerRunetId": itoa(idPayer),
+	body, err = client.Request(http.MethodPost, "pay/url", RequestParams{
+		"PayerRunetId": tools.MakeStringFromUINT32(idPayer),
 	})
 	return gjson.Get(string(body), "Url").String(), err
 }

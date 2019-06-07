@@ -1,6 +1,9 @@
 package api
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"net/http"
+)
 
 type Event struct {
 	ID   uint   `json:"Id"`
@@ -9,7 +12,7 @@ type Event struct {
 }
 
 func (client Client) GetEvents() (events []Event, err error) {
-	var body []byte; /**/ if body, err = client.Request("event/list", RequestParams{}); err == nil {
+	var body []byte; /**/ if body, err = client.Request(http.MethodPost, "event/list", RequestParams{}); err == nil {
 		err = json.Unmarshal(body, &events)
 	}
 	return

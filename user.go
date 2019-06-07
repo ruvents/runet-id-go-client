@@ -2,10 +2,12 @@ package api
 
 import (
 	"strings"
+	"strconv"
+	"net/http"
 )
 
 type User struct {
-	RunetId    int    `json:"RunetId"`
+	RunetId    uint32 `json:"RunetId"`
 	ExternalID string `json:"ExternalId"`
 	Email      string
 	Phone      string
@@ -17,7 +19,7 @@ type User struct {
 	Attributes map[string]string
 }
 
-func NewUser(schema... User) User {
+func NewUser(schema ... User) User {
 	return User{
 		Attributes: map[string]string{},
 	}
@@ -30,24 +32,24 @@ func (user User) GetFullName() string {
 func (user User) CreateHidden(api *Client) error {
 	params := struct2map(&user)
 	params["Visible"] = "0"
-	_, err := api.Request("user/create", params)
+	_, err := api.Request(http.MethodPost, "user/create", params)
 	return err
 }
 
 func (user User) Create(api *Client) error {
-	_, err := api.Request("user/create", struct2map(&user))
+	_, err := api.Request(http.MethodPost, "user/create", struct2map(&user))
 	return err
 }
 
 func (user User) Update(api *Client) error {
-	_, err := api.Request("user/edit", struct2map(&user))
+	_, err := api.EditUser(user)
 	return err
 }
 
 func (user User) Register(api *Client, roleid int) error {
-	_, err := api.Request("event/register", RequestParams{
+	_, err := api.Request(http.MethodPost, "event/register", RequestParams{
 		"RoleId":  itoa(roleid),
-		"RunetId": itoa(user.RunetId),
+		"RunetId": strconv.FormatUint(uint64(user.RunetId), 10),
 	})
 	return err
 }
