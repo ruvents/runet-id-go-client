@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"github.com/ruvents/api-go/models"
+	"github.com/ruvents/runet-id-go-client/models"
 	"net"
 	"github.com/apex/log"
 	"github.com/ruvents/tools"
