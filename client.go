@@ -4,18 +4,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/tidwall/gjson"
+	"github.com/apex/log"
 	"github.com/parnurzeal/gorequest"
+	"github.com/ruvents/runet-id-go-client/models"
+	"github.com/ruvents/tools"
+	"github.com/tidwall/gjson"
 	"io/ioutil"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
-	"github.com/ruvents/runet-id-go-client/models"
-	"net"
-	"github.com/apex/log"
-	"github.com/ruvents/tools"
-	"net/url"
 )
 
 var (
@@ -96,15 +96,15 @@ func (client Client) RequestNew(v interface{}, request *Request) (err error) {
 				log.Errorf("Ошибка на стороне API (нестандартная): %s", string(body))
 			}
 		}
-		//	// Проверка ошибки запроса к api
-		//	if gjson.Get(string(body), "Error.Code").Exists() {
-		//		jsonData := gjson.GetMany(string(body), "Error.Code", "Error.Message")
-		//		return nil, mkerr("Ошибка с кодом %d при обращении к %s: %s",
-		//			uint16(jsonData[0].Num),
-		//			requestUrl,
-		//			jsonData[1].Str,
-		//		)
-		//	}
+		// 	// Проверка ошибки запроса к api
+		// 	if gjson.Get(string(body), "Error.Code").Exists() {
+		// 		jsonData := gjson.GetMany(string(body), "Error.Code", "Error.Message")
+		// 		return nil, mkerr("Ошибка с кодом %d при обращении к %s: %s",
+		// 			uint16(jsonData[0].Num),
+		// 			requestUrl,
+		// 			jsonData[1].Str,
+		// 		)
+		// 	}
 		return
 	} else {
 		return mkerr(fmt.Sprintf("Ошибка отправки запроса: %s", err.Error()))
@@ -145,7 +145,7 @@ func (client Client) Request(method string, path string, params RequestParams) (
 	}
 }
 
-func (client Client) CreateUser(schema User, customizers ... RequestParams) (user User, err error) {
+func (client Client) CreateUser(schema User, customizers ...RequestParams) (user User, err error) {
 	params := RequestParams{
 		"Email":      schema.Email,
 		"FirstName":  schema.FirstName,
@@ -170,7 +170,7 @@ func (client Client) CreateUser(schema User, customizers ... RequestParams) (use
 	return
 }
 
-func (client Client) EditUserNew(schema models.User, customizers ... RequestParams) (user User, err error) {
+func (client Client) EditUserNew(schema models.User, customizers ...RequestParams) (user User, err error) {
 	params := RequestParams{
 		"RunetId":    strconv.Itoa(int(schema.ID)),
 		"Email":      schema.Email,
@@ -196,7 +196,7 @@ func (client Client) EditUserNew(schema models.User, customizers ... RequestPara
 	return
 }
 
-func (client Client) EditUser(schema User, customizers ... RequestParams) (user User, err error) {
+func (client Client) EditUser(schema User, customizers ...RequestParams) (user User, err error) {
 	params := RequestParams{
 		"RunetId":    strconv.Itoa(int(schema.RunetId)),
 		"Email":      schema.Email,
@@ -321,6 +321,17 @@ func (client Client) GetUserByParams(params RequestParams) (user User, err error
 	var body []byte /**/
 	if body, err = client.Request(http.MethodPost, "user/get", params); err == nil {
 		err = json.Unmarshal(body, &user)
+	}
+	return
+}
+
+func (client Client) GetPaperlessOstrovAssociations(deviceNumber uint16, araisedAt int64) (association models.PaperlessOstrovAssociation, err error) {
+	body, err := client.Request(http.MethodPost, "paperless/getHall", RequestParams{
+		"DeviceID":             tools.MakeStringFromUINT16(deviceNumber),
+		"AraisedAt":            tools.MakeStringFromINT64(araisedAt),
+	})
+	if err == nil {
+		err = json.Unmarshal(body, &association)
 	}
 	return
 }
